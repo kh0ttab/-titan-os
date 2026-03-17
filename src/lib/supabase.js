@@ -40,8 +40,12 @@ export async function getProfile(userId) {
     .from("profiles")
     .select("*")
     .eq("id", userId)
-    .single();
+    .maybeSingle();
   if (error) throw error;
+  // If no profile exists yet, return a default
+  if (!data) {
+    return { name: "User", role: "Member", initials: "U", color: "#00d4ff", dept: "General", is_admin: false };
+  }
   return data;
 }
 

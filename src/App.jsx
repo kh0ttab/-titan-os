@@ -436,6 +436,7 @@ export default function App(){
         if(data.ships)setShips(data.ships);
         if(data.standups)setStandups(data.standups);
         if(data.projects)setProjects(data.projects);
+        if(data.workSessions)setWS(data.workSessions);
       }
       setAuthLoading(false);
     }).catch(()=>setAuthLoading(false));
@@ -446,10 +447,10 @@ export default function App(){
     if(!user)return;
     if(saveTimerRef.current)clearTimeout(saveTimerRef.current);
     saveTimerRef.current=setTimeout(()=>{
-      saveWorkspaceState({kpis,tasks:tasks.map(t=>({...t,timerStart:null})),todos,goals,okrs,docs,ships,standups,projects}).catch(()=>{});
+      saveWorkspaceState({kpis,tasks:tasks.map(t=>({...t,timerStart:null})),todos,goals,okrs,docs,ships,standups,projects,workSessions}).catch(()=>{});
     },2000);
     return()=>{if(saveTimerRef.current)clearTimeout(saveTimerRef.current);};
-  },[kpis,tasks,todos,goals,okrs,docs,ships,standups,projects]);
+  },[kpis,tasks,todos,goals,okrs,docs,ships,standups,projects,workSessions]);
 
   const addNotif = (msg)=>setNotifs(p=>[{id:Date.now(),msg,time:"just now"},...p.slice(0,9)]);
   const eH = (ts,base)=>ts?base+(Date.now()-ts)/3600000:base;
@@ -1469,47 +1470,67 @@ function WorkspacePage({user,ws,checkIn,startBk,endBk,checkOut,wsOf,fmtMs,netWor
 // ══════════════════════════════════════════════════════════════════════════════
 // TEAM — Workload Heatmap
 // ══════════════════════════════════════════════════════════════════════════════
-function TeamPage({tasks,goals,todos,wsOf,fmtMs,ticker}){
+function TeamPage({tasks,goals,todos,wsOf,fmtMs,ticker,allTasks}){
+  const tAll=allTasks||tasks;
   const workloadData=USERS.map(u=>{
-    const ut=tasks.filter(t=>t.assignee===u.name&&t.status!=="Completed");
+    const ut=tAll.filter(t=>t.assignee===u.name&&t.status!=="Completed");
     const totalSP=ut.reduce((s,t)=>s+(t.effort||2),0);
     const highPrio=ut.filter(t=>t.priority==="High").length;
     const ws=wsOf(u.id);
     const net=ws.checkIn?(Date.now()-ws.checkIn)-ws.totalBreakMs-(ws.breakStart?Date.now()-ws.breakStart:0):0;
-    const load=totalSP>=15?"OVERLOADED":totalSP>=8?"BUSY":totalSP>=3?"ACTIVE":totalSP>0?"LIGHT":"FREE";
-    const lC={OVERLOADED:T.red,BUSY:T.amber,ACTIVE:T.green,LIGHT:"#60a5fa",FREE:T.muted};
-    return{...u,ut,totalSP,highPrio,ws,net,load,lC:lC[load]};
+    const activeTask=tAll.find(t=>t.assignee===u.name&&t.timerStart);
+    const load=totalSP>=15?"OVERLOADED":totalSP>=8?"HIGH":totalSP>=3?"MODERATE":totalSP>0?"LOW":"NONE";
+    const lC={OVERLOADED:T.red,HIGH:T.amber,MODERATE:"#60a5fa",LOW:T.green,NONE:T.muted};
+    return{...u,ut,totalSP,highPrio,ws,net,activeTask,load,lC:lC[load]};
   });
+  const onlineCount=workloadData.filter(u=>u.ws.status==="working").length;
+  const breakCount=workloadData.filter(u=>u.ws.status==="break").length;
+  const offlineCount=workloadData.filter(u=>u.ws.status==="out").length;
   return(
     <div>
       <STitle accent={T.accent}>Team & Workload</STitle>
+      {/* Quick presence summary */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:14}}>
+        {[{l:"ONLINE NOW",v:onlineCount,c:T.green,icon:"🟢"},{l:"ON BREAK",v:breakCount,c:T.amber,icon:"☕"},{l:"OFFLINE",v:offlineCount,c:T.muted,icon:"⚫"}].map(s=>(
+          <Card key={s.l} style={{textAlign:"center",padding:"10px 6px",border:`1px solid ${s.c}30`}}>
+            <div style={{fontSize:11,marginBottom:3}}>{s.icon}</div>
+            <div style={{fontSize:22,fontWeight:800,color:s.c,...mono}}>{s.v}</div>
+            <div style={{fontSize:8,color:T.muted,letterSpacing:1}}>{s.l}</div>
+          </Card>
+        ))}
+      </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:12,marginBottom:14}}>
         {workloadData.map(u=>{
           const capPct=Math.min(100,Math.round(u.totalSP/15*100));
           const ug=goals.filter(g=>g.owner===u.name);
           const avg=ug.length?Math.round(ug.reduce((s,g)=>s+g.progress,0)/ug.length):0;
+          const presenceC=u.ws.status==="working"?T.green:u.ws.status==="break"?T.amber:T.muted;
+          const presenceLabel=u.ws.status==="working"?"ONLINE":u.ws.status==="break"?"ON BREAK":"OFFLINE";
           return(
-            <Card key={u.id} style={{border:`1px solid ${u.lC}30`}}>
+            <Card key={u.id} style={{border:`1px solid ${presenceC}30`,borderLeft:`3px solid ${presenceC}`}}>
               <div style={{display:"flex",gap:11,alignItems:"flex-start",marginBottom:10}}>
-                <Av user={u} size={46}/>
+                <div style={{position:"relative"}}><Av user={u} size={46}/><div style={{position:"absolute",bottom:-1,right:-1,width:10,height:10,borderRadius:"50%",background:presenceC,border:`2px solid ${T.surface}`}} className={u.ws.status!=="out"?"pulse":""}/></div>
                 <div style={{flex:1}}>
                   <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:3,flexWrap:"wrap"}}>
                     <span style={{fontSize:13,fontWeight:700}}>{u.name}</span>
-                    <Tag c={u.lC} sm>{u.load}</Tag>
-                    <Tag c={u.ws.status==="working"?T.green:u.ws.status==="break"?T.amber:T.muted} sm>
-                      <span className={u.ws.status!=="out"?"pulse":""} style={{display:"inline-block",width:5,height:5,borderRadius:"50%",background:u.ws.status==="working"?T.green:u.ws.status==="break"?T.amber:T.muted,marginRight:3}}/>{u.ws.status.toUpperCase()}
-                    </Tag>
+                    <Tag c={presenceC} sm>{presenceLabel}</Tag>
+                    <span style={{fontSize:9,color:u.lC,fontWeight:700,background:u.lC+"18",padding:"1px 6px",borderRadius:3}}>WL: {u.load}</span>
                   </div>
                   <div style={{fontSize:10,color:T.muted}}>{u.role} · {u.dept}</div>
+                  {u.activeTask&&<div style={{fontSize:10,color:T.accent,marginTop:3}}><span className="pulse" style={{display:"inline-block",width:5,height:5,borderRadius:"50%",background:T.green,marginRight:4}}/>Working on: <strong>{u.activeTask.title}</strong></div>}
+                  {u.ws.status==="working"&&!u.activeTask&&<div style={{fontSize:10,color:T.muted,marginTop:3,fontStyle:"italic"}}>Checked in — no active task</div>}
                 </div>
-                {u.ws.status!=="out"&&<div style={{...mono,fontSize:9,color:T.green,flexShrink:0}}>{fmtMs(u.net)}</div>}
+                <div style={{textAlign:"right",flexShrink:0}}>
+                  {u.ws.status!=="out"&&<div style={{...mono,fontSize:12,color:presenceC,fontWeight:700}}>{fmtMs(u.net)}</div>}
+                  {u.ws.status==="out"&&<div style={{fontSize:9,color:T.muted}}>Not checked in</div>}
+                </div>
               </div>
               <div style={{marginBottom:8}}>
-                <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:T.muted,marginBottom:3}}><span>WORKLOAD</span><span style={{color:u.lC}}>{u.totalSP} / 15 SP</span></div>
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:T.muted,marginBottom:3}}><span>WORKLOAD ({u.totalSP} SP)</span><span style={{color:u.lC}}>{u.totalSP} / 15 SP</span></div>
                 <div style={{height:4,background:T.bg,borderRadius:3,overflow:"hidden"}}><div style={{height:"100%",width:capPct+"%",background:`linear-gradient(90deg,${u.color},${u.lC})`,borderRadius:3,transition:"width .4s"}}/></div>
               </div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:5}}>
-                {[{l:"Open",v:u.ut.length,c:u.color},{l:"High🔴",v:u.highPrio,c:T.red},{l:"Goal%",v:avg+"%",c:T.green},{l:"To-Do",v:todos.filter(t=>t.assignee===u.name&&!t.done).length,c:T.purple}].map(x=>(
+                {[{l:"Open",v:u.ut.length,c:u.color},{l:"High",v:u.highPrio,c:T.red},{l:"Goal%",v:avg+"%",c:T.green},{l:"To-Do",v:todos.filter(t=>t.assignee===u.name&&!t.done).length,c:T.purple}].map(x=>(
                   <div key={x.l} style={{background:T.bg,borderRadius:5,padding:"5px 4px",textAlign:"center"}}><div style={{fontSize:15,fontWeight:800,color:x.c,...mono}}>{x.v}</div><div style={{fontSize:7,color:T.muted}}>{x.l}</div></div>
                 ))}
               </div>
@@ -1801,23 +1822,28 @@ function DashPage({goals,tasks,todos,ships,user,setPage,eH,fmtT,companies,projec
   const pD=PERIODS.map(p=>{const gs=goals.filter(g=>g.period===p);return{name:p,avg:gs.length?Math.round(gs.reduce((s,g)=>s+g.progress,0)/gs.length):0,fill:PC[p]};});
 
   // ── Team live status data ──
+  const tAll=allTasks||tasks;
   const teamData=USERS.map(u=>{
     const ws=wsOf(u.id);
     const net=ws.checkIn?(Date.now()-ws.checkIn)-ws.totalBreakMs-(ws.breakStart?Date.now()-ws.breakStart:0):0;
-    const ut=(allTasks||tasks).filter(t=>t.assignee===u.name&&t.status!=="Completed");
+    const ut=tAll.filter(t=>t.assignee===u.name&&t.status!=="Completed");
     const totalSP=ut.reduce((s,t)=>s+(t.effort||2),0);
     const highPrio=ut.filter(t=>t.priority==="High").length;
-    const activeTask=(allTasks||tasks).find(t=>t.assignee===u.name&&t.timerStart);
-    const load=totalSP>=15?"OVERLOADED":totalSP>=8?"BUSY":totalSP>=3?"ACTIVE":totalSP>0?"LIGHT":"FREE";
-    const lC={OVERLOADED:T.red,BUSY:T.amber,ACTIVE:T.green,LIGHT:"#60a5fa",FREE:T.muted};
-    return{...u,ws,net,ut,totalSP,highPrio,activeTask,load,lC:lC[load]};
+    const activeTask=tAll.find(t=>t.assignee===u.name&&t.timerStart);
+    const completedToday=tAll.filter(t=>t.assignee===u.name&&t.status==="Completed"&&t.completedAt&&new Date(t.completedAt).toDateString()===new Date().toDateString()).length;
+    const load=totalSP>=15?"OVERLOADED":totalSP>=8?"HIGH":totalSP>=3?"MODERATE":totalSP>0?"LOW":"NONE";
+    const lC={OVERLOADED:T.red,HIGH:T.amber,MODERATE:"#60a5fa",LOW:T.green,NONE:T.muted};
+    return{...u,ws,net,ut,totalSP,highPrio,activeTask,completedToday,load,lC:lC[load]};
   });
   const onlineCount=teamData.filter(u=>u.ws.status==="working").length;
   const breakCount=teamData.filter(u=>u.ws.status==="break").length;
   const offlineCount=teamData.filter(u=>u.ws.status==="out").length;
+  const notCheckedIn=teamData.filter(u=>u.ws.status==="out");
+  const totalHoursToday=teamData.reduce((s,u)=>s+(u.net>0?u.net:0),0);
+  const tasksWithTimers=tAll.filter(t=>t.timerStart).length;
 
   // ── Activity feed: merge all employee session logs ──
-  const allLogs=USERS.flatMap(u=>{const ws=wsOf(u.id);return(ws.log||[]).map(ev=>({...ev,user:u}));}).sort((a,b)=>b.ts-a.ts).slice(0,12);
+  const allLogs=USERS.flatMap(u=>{const ws=wsOf(u.id);return(ws.log||[]).map(ev=>({...ev,user:u}));}).sort((a,b)=>b.ts-a.ts).slice(0,15);
   const evIcon={checkin:"🟢",break:"☕",back:"🔵",checkout:"🔴"};
   const evLabel={checkin:"checked in",break:"went on break",back:"back from break",checkout:"checked out"};
 
@@ -1825,9 +1851,30 @@ function DashPage({goals,tasks,todos,ships,user,setPage,eH,fmtT,companies,projec
     <div>
       <STitle accent={T.accent}>Command Center</STitle>
 
+      {/* ── TEAM PRESENCE BAR — the first thing a CEO sees ── */}
+      <Card style={{marginBottom:12,border:`1px solid ${T.accent}25`,padding:"10px 14px"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10}}>
+          <div style={{display:"flex",alignItems:"center",gap:14}}>
+            <div style={{display:"flex",alignItems:"center",gap:5}}><div style={{width:10,height:10,borderRadius:"50%",background:T.green}} className="pulse"/><span style={{fontSize:13,fontWeight:700,color:T.green}}>{onlineCount}</span><span style={{fontSize:10,color:T.muted}}>Online</span></div>
+            <div style={{width:1,height:18,background:T.border}}/>
+            <div style={{display:"flex",alignItems:"center",gap:5}}><div style={{width:10,height:10,borderRadius:"50%",background:T.amber}}/><span style={{fontSize:13,fontWeight:700,color:T.amber}}>{breakCount}</span><span style={{fontSize:10,color:T.muted}}>On Break</span></div>
+            <div style={{width:1,height:18,background:T.border}}/>
+            <div style={{display:"flex",alignItems:"center",gap:5}}><div style={{width:10,height:10,borderRadius:"50%",background:T.muted}}/><span style={{fontSize:13,fontWeight:700,color:T.muted}}>{offlineCount}</span><span style={{fontSize:10,color:T.muted}}>Offline</span></div>
+            <div style={{width:1,height:18,background:T.border}}/>
+            <div style={{display:"flex",alignItems:"center",gap:5}}><span style={{fontSize:11,color:T.accent}}>⏱</span><span style={{fontSize:13,fontWeight:700,color:T.accent,...mono}}>{tasksWithTimers}</span><span style={{fontSize:10,color:T.muted}}>Active Timers</span></div>
+            <div style={{width:1,height:18,background:T.border}}/>
+            <div style={{display:"flex",alignItems:"center",gap:5}}><span style={{fontSize:11,color:T.purple}}>⏳</span><span style={{fontSize:13,fontWeight:700,color:T.purple,...mono}}>{fmtMs(totalHoursToday)}</span><span style={{fontSize:10,color:T.muted}}>Team Hours Today</span></div>
+          </div>
+          {notCheckedIn.length>0&&<div style={{display:"flex",alignItems:"center",gap:5}}>
+            <span style={{fontSize:9,color:T.red,fontWeight:700}}>NOT CHECKED IN:</span>
+            {notCheckedIn.map(u=><Av key={u.id} user={u} size={20} style={{borderRadius:"50%",opacity:.5}}/>)}
+          </div>}
+        </div>
+      </Card>
+
       {/* ── KPI ROW ── */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(8,1fr)",gap:7,marginBottom:14}}>
-        {[{l:"GOALS",v:goals.length,c:T.accent},{l:"DONE",v:done,c:T.green},{l:"AVG%",v:avg+"%",c:T.purple},{l:"COMPANIES",v:companies.length,c:T.pink},{l:"PROJECTS",v:projects.length,c:T.amber},{l:"OPEN TODO",v:todos.filter(t=>!t.done).length,c:"#60a5fa"},{l:"ONLINE",v:onlineCount,c:T.green},{l:"ON BREAK",v:breakCount,c:T.amber}].map(c=>(
+      <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:7,marginBottom:14}}>
+        {[{l:"GOALS",v:goals.length,c:T.accent},{l:"COMPLETED",v:done,c:T.green},{l:"AVG PROGRESS",v:avg+"%",c:T.purple},{l:"COMPANIES",v:companies.length,c:T.pink},{l:"PROJECTS",v:projects.length,c:T.amber},{l:"OPEN TODOS",v:todos.filter(t=>!t.done).length,c:"#60a5fa"}].map(c=>(
           <Card key={c.l} style={{textAlign:"center",padding:"10px 6px",border:`1px solid ${c.c}25`,position:"relative",overflow:"hidden"}}>
             <div style={{position:"absolute",top:0,left:0,right:0,height:2,background:c.c,opacity:.5}}/>
             <div style={{fontSize:20,fontWeight:800,color:c.c,...mono}}>{c.v}</div>
@@ -1840,24 +1887,26 @@ function DashPage({goals,tasks,todos,ships,user,setPage,eH,fmtT,companies,projec
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
         <Card>
           <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}><p style={{fontSize:8,color:T.muted,letterSpacing:1}}>LIVE TEAM STATUS</p><button onClick={()=>setPage("team")} style={{background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:10}}>→ TEAM</button></div>
-          {teamData.map(u=>{const sc=u.ws.status==="working"?T.green:u.ws.status==="break"?T.amber:T.muted;return(
-            <div key={u.id} style={{display:"flex",gap:8,alignItems:"center",padding:"7px 0",borderBottom:`1px solid ${T.border}`}}>
-              <div style={{position:"relative"}}><Av user={u} size={32}/><div style={{position:"absolute",bottom:-1,right:-1,width:8,height:8,borderRadius:"50%",background:sc,border:`2px solid ${T.surface}`}} className={u.ws.status!=="out"?"pulse":""}/></div>
+          {teamData.map(u=>{const presenceC=u.ws.status==="working"?T.green:u.ws.status==="break"?T.amber:T.muted;const presenceLabel=u.ws.status==="working"?"ONLINE":u.ws.status==="break"?"ON BREAK":"OFFLINE";return(
+            <div key={u.id} style={{display:"flex",gap:8,alignItems:"center",padding:"7px 0",borderBottom:`1px solid ${T.border}`,opacity:u.ws.status==="out"?.5:1}}>
+              <div style={{position:"relative"}}><Av user={u} size={32}/><div style={{position:"absolute",bottom:-1,right:-1,width:8,height:8,borderRadius:"50%",background:presenceC,border:`2px solid ${T.surface}`}} className={u.ws.status!=="out"?"pulse":""}/></div>
               <div style={{flex:1,minWidth:0}}>
-                <div style={{display:"flex",gap:5,alignItems:"center",flexWrap:"wrap"}}><span style={{fontSize:11,fontWeight:700}}>{u.name}</span><span style={{fontSize:8,color:sc,fontWeight:700,letterSpacing:.5}}>{u.ws.status==="working"?"WORKING":u.ws.status==="break"?"ON BREAK":"OFFLINE"}</span></div>
+                <div style={{display:"flex",gap:5,alignItems:"center",flexWrap:"wrap"}}><span style={{fontSize:11,fontWeight:700}}>{u.name}</span><span style={{fontSize:8,color:presenceC,fontWeight:700,background:presenceC+"18",padding:"1px 5px",borderRadius:3,letterSpacing:.5}}>{presenceLabel}</span></div>
                 <div style={{fontSize:9,color:T.muted}}>{u.role}</div>
-                {u.activeTask&&<div style={{fontSize:9,color:T.accent,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}><span className="pulse" style={{display:"inline-block",width:4,height:4,borderRadius:"50%",background:T.green,marginRight:4}}/>Working on: {u.activeTask.title}</div>}
+                {u.activeTask&&<div style={{fontSize:9,color:T.accent,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}><span className="pulse" style={{display:"inline-block",width:4,height:4,borderRadius:"50%",background:T.green,marginRight:4}}/>Task: <strong>{u.activeTask.title}</strong></div>}
+                {u.ws.status==="working"&&!u.activeTask&&<div style={{fontSize:9,color:T.amber,marginTop:2,fontStyle:"italic"}}>Online — no active task timer</div>}
+                {u.ws.status==="out"&&<div style={{fontSize:9,color:T.muted,marginTop:2}}>Not checked in</div>}
               </div>
               <div style={{textAlign:"right",flexShrink:0}}>
-                {u.ws.status!=="out"&&<div style={{fontSize:10,fontWeight:700,color:sc,...mono}}>{fmtMs(u.net)}</div>}
-                <div style={{fontSize:8,color:u.lC,...mono,fontWeight:700}}>{u.load}</div>
+                {u.ws.status!=="out"&&<div style={{fontSize:11,fontWeight:700,color:presenceC,...mono}}>{fmtMs(u.net)}</div>}
+                <div style={{fontSize:8,color:u.lC,...mono,fontWeight:600}}>WL: {u.load}</div>
               </div>
             </div>
           );})}
         </Card>
         <Card>
           <p style={{fontSize:8,color:T.muted,letterSpacing:1,marginBottom:8}}>TEAM ACTIVITY FEED</p>
-          {allLogs.length===0&&<p style={{color:T.muted,fontSize:11,textAlign:"center",padding:20}}>No activity yet. Employees will appear here when they check in.</p>}
+          {allLogs.length===0&&<div style={{textAlign:"center",padding:24}}><div style={{fontSize:28,marginBottom:8}}>📋</div><p style={{color:T.muted,fontSize:11}}>No activity yet today.</p><p style={{color:T.muted,fontSize:9,marginTop:4}}>Employee check-ins, breaks, and checkouts will appear here in real-time.</p></div>}
           {allLogs.map((ev,i)=>(
             <div key={i} style={{display:"flex",gap:7,alignItems:"center",padding:"6px 0",borderBottom:`1px solid ${T.border}`}}>
               <span style={{fontSize:12,flexShrink:0}}>{evIcon[ev.ev]}</span>
@@ -1879,12 +1928,15 @@ function DashPage({goals,tasks,todos,ships,user,setPage,eH,fmtT,companies,projec
             const capPct=Math.min(100,Math.round(u.totalSP/15*100));
             const ug=goals.filter(g=>g.owner===u.name);
             const goalAvg=ug.length?Math.round(ug.reduce((s,g)=>s+g.progress,0)/ug.length):0;
+            const presenceC=u.ws.status==="working"?T.green:u.ws.status==="break"?T.amber:T.muted;
             return(
-              <div key={u.id} style={{background:T.bg,borderRadius:7,padding:8,textAlign:"center",border:`1px solid ${u.lC}30`}}>
-                <div style={{position:"relative",display:"inline-block",marginBottom:6}}><Av user={u} size={36}/><div style={{position:"absolute",bottom:-1,right:-1,width:8,height:8,borderRadius:"50%",background:u.ws.status==="working"?T.green:u.ws.status==="break"?T.amber:T.muted,border:`2px solid ${T.bg}`}} className={u.ws.status!=="out"?"pulse":""}/></div>
-                <div style={{fontSize:10,fontWeight:700,marginBottom:2}}>{u.name.split(" ")[0]}</div>
-                <Tag c={u.lC} sm>{u.load}</Tag>
-                <div style={{height:4,background:T.surface,borderRadius:3,overflow:"hidden",margin:"6px 0"}}><div style={{height:"100%",width:capPct+"%",background:`linear-gradient(90deg,${u.color},${u.lC})`,borderRadius:3}}/></div>
+              <div key={u.id} style={{background:T.bg,borderRadius:7,padding:8,textAlign:"center",border:`1px solid ${presenceC}30`,borderTop:`3px solid ${presenceC}`,opacity:u.ws.status==="out"?.6:1}}>
+                <div style={{position:"relative",display:"inline-block",marginBottom:4}}><Av user={u} size={36}/><div style={{position:"absolute",bottom:-1,right:-1,width:8,height:8,borderRadius:"50%",background:presenceC,border:`2px solid ${T.bg}`}} className={u.ws.status!=="out"?"pulse":""}/></div>
+                <div style={{fontSize:10,fontWeight:700,marginBottom:1}}>{u.name.split(" ")[0]}</div>
+                <div style={{fontSize:8,color:presenceC,fontWeight:700,marginBottom:3}}>{u.ws.status==="working"?"ONLINE":u.ws.status==="break"?"BREAK":"OFFLINE"}</div>
+                {u.ws.status!=="out"&&<div style={{fontSize:9,color:presenceC,...mono,fontWeight:700,marginBottom:3}}>{fmtMs(u.net)}</div>}
+                <div style={{fontSize:8,color:u.lC,fontWeight:700,background:u.lC+"18",padding:"1px 5px",borderRadius:3,display:"inline-block",marginBottom:4}}>WL: {u.load}</div>
+                <div style={{height:4,background:T.surface,borderRadius:3,overflow:"hidden",margin:"4px 0"}}><div style={{height:"100%",width:capPct+"%",background:`linear-gradient(90deg,${u.color},${u.lC})`,borderRadius:3}}/></div>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:3}}>
                   {[{l:"Tasks",v:u.ut.length,c:u.color},{l:"High",v:u.highPrio,c:T.red},{l:"Goal%",v:goalAvg+"%",c:T.green},{l:"SP",v:u.totalSP,c:T.purple}].map(x=>(
                     <div key={x.l} style={{padding:3,borderRadius:3,background:T.surface}}><div style={{fontSize:12,fontWeight:800,color:x.c,...mono}}>{x.v}</div><div style={{fontSize:6,color:T.muted}}>{x.l}</div></div>
@@ -1906,13 +1958,13 @@ function DashPage({goals,tasks,todos,ships,user,setPage,eH,fmtT,companies,projec
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
         <Card>
           <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}><p style={{fontSize:8,color:T.muted,letterSpacing:1}}>ACTIVE TASKS</p><button onClick={()=>setPage("tasks")} style={{background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:10}}>→ ALL</button></div>
-          {tasks.filter(t=>t.status!=="Completed").slice(0,6).map(t=>(
+          {tasks.filter(t=>t.status!=="Completed").slice(0,6).map(t=>{const assigneeUser=USERS.find(x=>x.name===t.assignee);const aw=assigneeUser?wsOf(assigneeUser.id):{status:"out"};return(
             <div key={t.id} style={{display:"flex",gap:7,alignItems:"center",padding:"6px 0",borderBottom:`1px solid ${T.border}`}}>
               <div style={{width:5,height:5,borderRadius:"50%",background:t.timerStart?T.green:T.amber,flexShrink:0}} className={t.timerStart?"pulse":""}/>
-              <div style={{flex:1}}><div style={{fontSize:11}}>{t.title}</div><div style={{fontSize:9,color:T.muted}}>{t.assignee} · {t.dueDate}</div></div>
+              <div style={{flex:1}}><div style={{fontSize:11}}>{t.title}</div><div style={{display:"flex",alignItems:"center",gap:4,marginTop:2}}>{assigneeUser&&<Av user={assigneeUser} size={14} style={{borderRadius:"50%"}}/>}<span style={{fontSize:9,color:T.muted}}>{t.assignee}</span><span style={{width:4,height:4,borderRadius:"50%",background:aw.status==="working"?T.green:aw.status==="break"?T.amber:T.muted,display:"inline-block"}} className={aw.status!=="out"?"pulse":""}/><span style={{fontSize:9,color:T.muted}}>{t.dueDate}</span></div></div>
               <span style={{fontSize:9,color:T.accent,...mono}}>{eH(t.timerStart,t.loggedHours).toFixed(1)}h</span>
             </div>
-          ))}
+          );})}
         </Card>
         <Card>
           <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}><p style={{fontSize:8,color:T.muted,letterSpacing:1}}>PROJECTS</p><button onClick={()=>setPage("projects")} style={{background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:10}}>→ ALL</button></div>

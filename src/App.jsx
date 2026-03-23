@@ -472,11 +472,12 @@ export default function App(){
     return{...t,status:"Completed",kanban:"Done",timerStart:null,loggedHours:+(t.loggedHours+extra).toFixed(2)};
   }));
 
-  const wsOf=(uid)=>workSessions[uid]||{status:"out",checkIn:null,breakStart:null,totalBreakMs:0,log:[]};
-  const checkIn =(uid)=>{const now=Date.now();setWS(p=>({...p,[uid]:{...wsOf(uid),status:"working",checkIn:now,log:[...wsOf(uid).log,{ev:"checkin",ts:now}]}}));addNotif(`🟢 ${USERS.find(u=>u.id===uid)?.name} checked in`);};
-  const startBk =(uid)=>{const now=Date.now();setWS(p=>({...p,[uid]:{...wsOf(uid),status:"break",breakStart:now,log:[...wsOf(uid).log,{ev:"break",ts:now}]}}));};
-  const endBk   =(uid)=>{const ws=wsOf(uid);const now=Date.now();const add=ws.breakStart?now-ws.breakStart:0;setWS(p=>({...p,[uid]:{...ws,status:"working",breakStart:null,totalBreakMs:ws.totalBreakMs+add,log:[...ws.log,{ev:"back",ts:now}]}}));};
-  const checkOut=(uid)=>{const now=Date.now();setWS(p=>({...p,[uid]:{...wsOf(uid),status:"out",log:[...wsOf(uid).log,{ev:"checkout",ts:now}]}}));};
+  // Work sessions keyed by user NAME (shared between USERS array and Supabase auth)
+  const wsOf=(name)=>workSessions[name]||{status:"out",checkIn:null,breakStart:null,totalBreakMs:0,log:[]};
+  const checkIn =(name)=>{const now=Date.now();setWS(p=>({...p,[name]:{...wsOf(name),status:"working",checkIn:now,log:[...wsOf(name).log,{ev:"checkin",ts:now}]}}));addNotif(`🟢 ${name} checked in`);};
+  const startBk =(name)=>{const now=Date.now();setWS(p=>({...p,[name]:{...wsOf(name),status:"break",breakStart:now,log:[...wsOf(name).log,{ev:"break",ts:now}]}}));};
+  const endBk   =(name)=>{const ws=wsOf(name);const now=Date.now();const add=ws.breakStart?now-ws.breakStart:0;setWS(p=>({...p,[name]:{...ws,status:"working",breakStart:null,totalBreakMs:ws.totalBreakMs+add,log:[...ws.log,{ev:"back",ts:now}]}}));};
+  const checkOut=(name)=>{const now=Date.now();setWS(p=>({...p,[name]:{...wsOf(name),status:"out",log:[...wsOf(name).log,{ev:"checkout",ts:now}]}}));};
 
   if(authLoading) return <><style>{css}</style><div style={{minHeight:"100vh",background:T.bg,display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{textAlign:"center"}}><div style={{fontSize:40,marginBottom:10}}>🦁</div><p style={{color:T.muted,fontSize:12,letterSpacing:2}}>LOADING...</p></div></div></>;
   if(!user) return <><style>{css}</style><Login onLogin={u=>{setUser(u);addNotif(`👋 Welcome back, ${u.name}!`);}}/></>;
@@ -488,7 +489,7 @@ export default function App(){
   const myProjs = user.isAdmin?projects:projects.filter(p=>p.members.includes(user.id));
   const pending = todos.filter(t=>!t.done).length;
   const activeT = tasks.find(t=>t.timerStart);
-  const ws = wsOf(user.id);
+  const ws = wsOf(user.name);
   const netWork = ws.checkIn?(Date.now()-ws.checkIn)-ws.totalBreakMs-(ws.breakStart?Date.now()-ws.breakStart:0):0;
 
   const props={user,tasks:myTasks,setTasks,todos:myTodos,setTodos,goals:myGoals,setGoals,okrs:myOkrs,setOkrs,kpis,setKpis,docs,setDocs,ships,setShips,standups,setStandups,companies,projects:myProjs,setProjects,addNotif,toggleTimer,completeTask,eH,fmtT,fmtMs,ticker,ws,checkIn,startBk,endBk,checkOut,netWork,wsOf,setPage,allTasks:tasks,allGoals:goals,fmtUSD};
@@ -513,9 +514,9 @@ export default function App(){
               {ws.status!=="out"&&<span style={{marginLeft:"auto",fontSize:8,color:T.muted,...mono}}>{fmtMs(netWork)}</span>}
             </div>
             <div style={{display:"flex",gap:3}}>
-              {ws.status==="out"&&<button onClick={()=>checkIn(user.id)} style={bS(T.green,{flex:1,padding:"3px 0",fontSize:9,color:T.bg,letterSpacing:.5})}>CHECK IN</button>}
-              {ws.status==="working"&&<><button onClick={()=>startBk(user.id)} style={bS(T.amber,{flex:1,padding:"3px 0",fontSize:9,color:T.bg})}>☕ BREAK</button><button onClick={()=>checkOut(user.id)} style={bS(T.red,{flex:1,padding:"3px 0",fontSize:9,color:"#fff"})}>OUT</button></>}
-              {ws.status==="break"&&<button onClick={()=>endBk(user.id)} style={bS(T.accent,{flex:1,padding:"3px 0",fontSize:9,color:T.bg})}>▶ BACK</button>}
+              {ws.status==="out"&&<button onClick={()=>checkIn(user.name)} style={bS(T.green,{flex:1,padding:"3px 0",fontSize:9,color:T.bg,letterSpacing:.5})}>CHECK IN</button>}
+              {ws.status==="working"&&<><button onClick={()=>startBk(user.name)} style={bS(T.amber,{flex:1,padding:"3px 0",fontSize:9,color:T.bg})}>☕ BREAK</button><button onClick={()=>checkOut(user.name)} style={bS(T.red,{flex:1,padding:"3px 0",fontSize:9,color:"#fff"})}>OUT</button></>}
+              {ws.status==="break"&&<button onClick={()=>endBk(user.name)} style={bS(T.accent,{flex:1,padding:"3px 0",fontSize:9,color:T.bg})}>▶ BACK</button>}
             </div>
           </div>
           <nav style={{flex:1,padding:"8px 6px"}}>
@@ -1446,16 +1447,16 @@ function WorkspacePage({user,ws,checkIn,startBk,endBk,checkOut,wsOf,fmtMs,netWor
             ))}
           </div>
           <div style={{display:"flex",flexDirection:"column",gap:7,minWidth:130}}>
-            {ws.status==="out"&&<button onClick={()=>checkIn(user.id)} style={bS(T.green,{padding:"10px 14px",fontSize:13,color:T.bg,letterSpacing:.5})}>🟢 CHECK IN</button>}
-            {ws.status==="working"&&<><button onClick={()=>startBk(user.id)} style={bS(T.amber,{padding:"9px 14px",fontSize:12,color:T.bg})}>☕ BREAK</button><button onClick={()=>checkOut(user.id)} style={bS(T.red,{padding:"9px 14px",fontSize:12,color:"#fff"})}>🔴 CHECK OUT</button></>}
-            {ws.status==="break"&&<><div style={{textAlign:"center",fontSize:11,color:T.amber,...mono}} className="pulse">ON BREAK</div><button onClick={()=>endBk(user.id)} style={bS(T.accent,{padding:"9px 14px",fontSize:12,color:T.bg})}>▶ BACK</button></>}
+            {ws.status==="out"&&<button onClick={()=>checkIn(user.name)} style={bS(T.green,{padding:"10px 14px",fontSize:13,color:T.bg,letterSpacing:.5})}>🟢 CHECK IN</button>}
+            {ws.status==="working"&&<><button onClick={()=>startBk(user.name)} style={bS(T.amber,{padding:"9px 14px",fontSize:12,color:T.bg})}>☕ BREAK</button><button onClick={()=>checkOut(user.name)} style={bS(T.red,{padding:"9px 14px",fontSize:12,color:"#fff"})}>🔴 CHECK OUT</button></>}
+            {ws.status==="break"&&<><div style={{textAlign:"center",fontSize:11,color:T.amber,...mono}} className="pulse">ON BREAK</div><button onClick={()=>endBk(user.name)} style={bS(T.accent,{padding:"9px 14px",fontSize:12,color:T.bg})}>▶ BACK</button></>}
           </div>
         </div>
       </Card>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
         <Card>
           <p style={{fontSize:9,color:T.muted,letterSpacing:1,marginBottom:10}}>TEAM STATUS</p>
-          {USERS.map(u=>{const w=wsOf(u.id);const col=SC[w.status];const net=w.checkIn?(Date.now()-w.checkIn)-w.totalBreakMs-(w.breakStart?Date.now()-w.breakStart:0):0;return(<div key={u.id} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 0",borderBottom:`1px solid ${T.border}`}}><Av user={u} size={30}/><div style={{flex:1}}><div style={{fontSize:12,fontWeight:600}}>{u.name}</div><div style={{fontSize:9,color:T.muted}}>{u.role}</div></div><div style={{textAlign:"right"}}><div style={{fontSize:9,fontWeight:700,color:col}}><span style={{display:"inline-block",width:5,height:5,borderRadius:"50%",background:col,marginRight:3}} className={w.status!=="out"?"pulse":""}/>{w.status.toUpperCase()}</div>{w.status!=="out"&&<div style={{fontSize:8,color:T.muted,...mono}}>{fmtMs(net)}</div>}</div></div>);})}
+          {USERS.map(u=>{const w=wsOf(u.name);const col=SC[w.status];const net=w.checkIn?(Date.now()-w.checkIn)-w.totalBreakMs-(w.breakStart?Date.now()-w.breakStart:0):0;return(<div key={u.id} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 0",borderBottom:`1px solid ${T.border}`}}><Av user={u} size={30}/><div style={{flex:1}}><div style={{fontSize:12,fontWeight:600}}>{u.name}</div><div style={{fontSize:9,color:T.muted}}>{u.role}</div></div><div style={{textAlign:"right"}}><div style={{fontSize:9,fontWeight:700,color:col}}><span style={{display:"inline-block",width:5,height:5,borderRadius:"50%",background:col,marginRight:3}} className={w.status!=="out"?"pulse":""}/>{w.status.toUpperCase()}</div>{w.status!=="out"&&<div style={{fontSize:8,color:T.muted,...mono}}>{fmtMs(net)}</div>}</div></div>);})}
         </Card>
         <Card>
           <p style={{fontSize:9,color:T.muted,letterSpacing:1,marginBottom:10}}>SESSION LOG</p>
@@ -1476,7 +1477,7 @@ function TeamPage({tasks,goals,todos,wsOf,fmtMs,ticker,allTasks}){
     const ut=tAll.filter(t=>t.assignee===u.name&&t.status!=="Completed");
     const totalSP=ut.reduce((s,t)=>s+(t.effort||2),0);
     const highPrio=ut.filter(t=>t.priority==="High").length;
-    const ws=wsOf(u.id);
+    const ws=wsOf(u.name);
     const net=ws.checkIn?(Date.now()-ws.checkIn)-ws.totalBreakMs-(ws.breakStart?Date.now()-ws.breakStart:0):0;
     const activeTask=tAll.find(t=>t.assignee===u.name&&t.timerStart);
     const load=totalSP>=15?"OVERLOADED":totalSP>=8?"HIGH":totalSP>=3?"MODERATE":totalSP>0?"LOW":"NONE";
@@ -1824,7 +1825,7 @@ function DashPage({goals,tasks,todos,ships,user,setPage,eH,fmtT,companies,projec
   // ── Team live status data ──
   const tAll=allTasks||tasks;
   const teamData=USERS.map(u=>{
-    const ws=wsOf(u.id);
+    const ws=wsOf(u.name);
     const net=ws.checkIn?(Date.now()-ws.checkIn)-ws.totalBreakMs-(ws.breakStart?Date.now()-ws.breakStart:0):0;
     const ut=tAll.filter(t=>t.assignee===u.name&&t.status!=="Completed");
     const totalSP=ut.reduce((s,t)=>s+(t.effort||2),0);
@@ -1843,7 +1844,7 @@ function DashPage({goals,tasks,todos,ships,user,setPage,eH,fmtT,companies,projec
   const tasksWithTimers=tAll.filter(t=>t.timerStart).length;
 
   // ── Activity feed: merge all employee session logs ──
-  const allLogs=USERS.flatMap(u=>{const ws=wsOf(u.id);return(ws.log||[]).map(ev=>({...ev,user:u}));}).sort((a,b)=>b.ts-a.ts).slice(0,15);
+  const allLogs=USERS.flatMap(u=>{const ws=wsOf(u.name);return(ws.log||[]).map(ev=>({...ev,user:u}));}).sort((a,b)=>b.ts-a.ts).slice(0,15);
   const evIcon={checkin:"🟢",break:"☕",back:"🔵",checkout:"🔴"};
   const evLabel={checkin:"checked in",break:"went on break",back:"back from break",checkout:"checked out"};
 
@@ -1958,7 +1959,7 @@ function DashPage({goals,tasks,todos,ships,user,setPage,eH,fmtT,companies,projec
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
         <Card>
           <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}><p style={{fontSize:8,color:T.muted,letterSpacing:1}}>ACTIVE TASKS</p><button onClick={()=>setPage("tasks")} style={{background:"none",border:"none",color:T.accent,cursor:"pointer",fontSize:10}}>→ ALL</button></div>
-          {tasks.filter(t=>t.status!=="Completed").slice(0,6).map(t=>{const assigneeUser=USERS.find(x=>x.name===t.assignee);const aw=assigneeUser?wsOf(assigneeUser.id):{status:"out"};return(
+          {tasks.filter(t=>t.status!=="Completed").slice(0,6).map(t=>{const assigneeUser=USERS.find(x=>x.name===t.assignee);const aw=wsOf(t.assignee);return(
             <div key={t.id} style={{display:"flex",gap:7,alignItems:"center",padding:"6px 0",borderBottom:`1px solid ${T.border}`}}>
               <div style={{width:5,height:5,borderRadius:"50%",background:t.timerStart?T.green:T.amber,flexShrink:0}} className={t.timerStart?"pulse":""}/>
               <div style={{flex:1}}><div style={{fontSize:11}}>{t.title}</div><div style={{display:"flex",alignItems:"center",gap:4,marginTop:2}}>{assigneeUser&&<Av user={assigneeUser} size={14} style={{borderRadius:"50%"}}/>}<span style={{fontSize:9,color:T.muted}}>{t.assignee}</span><span style={{width:4,height:4,borderRadius:"50%",background:aw.status==="working"?T.green:aw.status==="break"?T.amber:T.muted,display:"inline-block"}} className={aw.status!=="out"?"pulse":""}/><span style={{fontSize:9,color:T.muted}}>{t.dueDate}</span></div></div>

@@ -79,3 +79,7 @@ create trigger on_auth_user_created
 -- 4. Insert default workspace state row
 insert into public.workspace_state (id, data) values ('default', '{}')
 on conflict (id) do nothing;
+
+-- 5. Enable Realtime on workspace_state so changes sync across all users
+-- This allows the CEO dashboard to see employee check-ins/tasks in real-time
+alter publication supabase_realtime add table public.workspace_state;

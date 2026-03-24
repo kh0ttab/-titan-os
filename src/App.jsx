@@ -403,6 +403,7 @@ export default function App(){
   const [workSessions,setWS]       = useState({});
   const [authLoading,setAuthLoading] = useState(true);
   const saveTimerRef = useRef(null);
+  const skipNextSync = useRef(false); // prevent save→subscribe→save loop
 
   useEffect(()=>{const id=setInterval(()=>setTicker(t=>t+1),1000);return()=>clearInterval(id);},[]);
 
@@ -422,32 +423,54 @@ export default function App(){
     return()=>subscription.unsubscribe();
   },[]);
 
+  // ── Helper: apply remote workspace data to local state ──────────────────
+  const applyRemoteState=(data)=>{
+    if(!data)return;
+    skipNextSync.current=true; // prevent re-save from these setState calls
+    if(data.kpis)setKpis(data.kpis);
+    if(data.tasks)setTasks(data.tasks);
+    if(data.todos)setTodos(data.todos);
+    if(data.goals)setGoals(data.goals);
+    if(data.okrs)setOkrs(data.okrs);
+    if(data.docs)setDocs(data.docs);
+    if(data.ships)setShips(data.ships);
+    if(data.standups)setStandups(data.standups);
+    if(data.projects)setProjects(data.projects);
+    if(data.workSessions)setWS(data.workSessions);
+    // Reset sync guard after React batches the updates
+    setTimeout(()=>{skipNextSync.current=false;},500);
+  };
+
   // ── Load workspace state from Supabase on login ───────────────────────────
   useEffect(()=>{
     if(!user)return;
     loadWorkspaceState().then(data=>{
-      if(data){
-        if(data.kpis)setKpis(data.kpis);
-        if(data.tasks)setTasks(data.tasks);
-        if(data.todos)setTodos(data.todos);
-        if(data.goals)setGoals(data.goals);
-        if(data.okrs)setOkrs(data.okrs);
-        if(data.docs)setDocs(data.docs);
-        if(data.ships)setShips(data.ships);
-        if(data.standups)setStandups(data.standups);
-        if(data.projects)setProjects(data.projects);
-        if(data.workSessions)setWS(data.workSessions);
-      }
+      applyRemoteState(data);
       setAuthLoading(false);
     }).catch(()=>setAuthLoading(false));
+  },[user]);
+
+  // ── Supabase Realtime: sync workspace state across all logged-in users ────
+  useEffect(()=>{
+    if(!user)return;
+    const channel=supabase.channel("workspace-sync").on(
+      "postgres_changes",
+      {event:"UPDATE",schema:"public",table:"workspace_state",filter:"id=eq.default"},
+      (payload)=>{
+        const data=payload.new?.data;
+        if(data)applyRemoteState(data);
+      }
+    ).subscribe();
+    return()=>{supabase.removeChannel(channel);};
   },[user]);
 
   // ── Auto-save workspace state (debounced 2s) ─────────────────────────────
   useEffect(()=>{
     if(!user)return;
+    if(skipNextSync.current)return; // don't re-save data we just received
     if(saveTimerRef.current)clearTimeout(saveTimerRef.current);
     saveTimerRef.current=setTimeout(()=>{
-      saveWorkspaceState({kpis,tasks:tasks.map(t=>({...t,timerStart:null})),todos,goals,okrs,docs,ships,standups,projects,workSessions}).catch(()=>{});
+      saveWorkspaceState({kpis,tasks,todos,goals,okrs,docs,ships,standups,projects,workSessions}).catch(()=>{});
     },2000);
     return()=>{if(saveTimerRef.current)clearTimeout(saveTimerRef.current);};
   },[kpis,tasks,todos,goals,okrs,docs,ships,standups,projects,workSessions]);
